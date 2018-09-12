@@ -10,3 +10,6 @@ BASIC :收集基本的统计信息
 TYPICAL：收集大部分统计信息(数据库的默认设置)
 ALL：收集全部统计信息
 Oracle 10g之后，Query Optimizer就已经将CBO作为默认优化器，并且Oracle官方不再支持RBO服务。
+
+
+weblogic.jar在启动weblogic服务的时候就被自动添加到CLASSPATH中
