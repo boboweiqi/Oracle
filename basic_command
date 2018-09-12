@@ -1,0 +1,25 @@
+Oracle Statistic 的收集，可以使用analyze 命令，也可以使用DBMS_STATS 包来收集，Oracle 建议使用DBMS_STATS包来收集统计信息，因为DBMS_STATS包收集的更广，并且更准确。analyze 在以后的版本中可能会被移除。
+
+DBMS_STATS常用的几个过程如下：
+
+
+dbms_stats.gather_table_stats 收集表、列和索引的统计信息；
+dbms_stats.gather_schema_stats 收集SCHEMA下所有对象的统计信息；
+dbms_stats.gather_index_stats 收集索引的统计信息；
+dbms_stats.gather_system_stats 收集系统统计信息
+dbms_stats.GATHER_DICTIONARY_STATS：所有字典对象的统计；
+DBMS_STATS.GATHER_DICTIONARY_STATS 其收集所有系统模式的统计
+dbms_stats.delete_table_stats 删除表的统计信息
+dbms_stats.delete_index_stats 删除索引的统计信息
+dbms_stats.export_table_stats 输出表的统计信息
+dbms_stats.create_state_table
+dbms_stats.set_table_stats 设置表的统计
+dbms_stats.auto_sample_size
+
+
+analyze 命令的语法如下：
+
+
+SQL>analyze table tablename compute statistics;
+SQL>analyze table tablename compute statistics for all indexes;
+SQL>analyze table tablename delete statistics
