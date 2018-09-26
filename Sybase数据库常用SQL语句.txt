@@ -1,0 +1,129 @@
+一、性能情况排查常用系统存储过程
+系统性能参数类：
+1.查询使用的engine
+select engine, status from sysengines
+2.查看默认的线程池 配置
+sp_helpthread
+
+查询系统表
+1.查询系统所有用户表
+select name from sysobjects where type = 'U' and name like 'tbl%' 
+2.查询表列信息
+sp_columns 表名
+3.数据库死锁进程
+select * from master..syslogshold
+go
+4.查询表的争夺情况
+sp_object_stats "00:05:00"
+
+5.数据库监控信息分析
+--监视数据库活动命令
+select spid,cmd,physical_io,blocked from master..sysprocesses where spid>15 and cmd <> 'AWAITING COMMAND'
+go
+
+6.对于并行查询表进行表分区
+alter table table_name partition n    //table_name 表名,n 分区个数
+
+7.对于表启动并行查询
+
+8.统计更新SQL
+update statistics 表名
+
+6.监控系统执行的sql命令
+dbcc traceon（3604）
+dbcc sqltext(@spid)
+
+二、数据库管理配置过程命令
+sp_addlogin loginame,passwd[,defdb] //创建登陆用户
+sp_addgroup grpname //创建用户组
+sp_changegroup 
+sp_adduser loginame[,name_in_db][,grpname] //将用户添加到数据库中，或者组中
+sp_password caller_passwd,new_passwd[,loginname] //修改用户密码	
+sp_helpdb dbname //查看数据库信息
+
+三、常用统计分析SQL
+1.bcp使用带条件的方式
+bcp #temptbl out tblBonusDetailHis.txt --initstring "select * into #temptbl  from tblBonusDetailHis 
+where TransCfmDate='20170913' " -Uopenfund -Pyjtyycsdbu01 -SSPDBJJ -c -t※
+
+2.导出ddl语句
+cd /sybase/ASE-15_0/bin
+./ddlgen -Uopenfund -Pyjtyycsdbu01 -SSPDBJJ -Dopenfund -Oopenfundddl.txt
+
+四、常用数据库函数
+Sybase预定义函数 
+
+1．聚集函数 
+
+sum([all|distinct]表达式) 
+
+avg([all|distinct]表达式) 
+
+count([all|distinct]表达式) 
+
+count 
+
+max(表达式) 
+
+min(表达式) 
+
+2．字符串函数 
+
+upper(字符表达式) 
+
+lower(字符表达式) 
+
+char(整型表达式) 
+
+char_length(字符表达式) 
+
+ltrim(字符表达式) 
+
+rtrim(字符表达式) 
+
+…… 
+
+3．数学函数 
+
+abs(精确小数型表达式) 
+
+floor(精确小数型表达式)求小于或等于给定表达式值的最大整数（取底） 
+
+rand([整数型] 
+
+round(精确小数型表达式,整数) 
+
+sign(精确小数型表达式) 
+
+power(精确小数型表达式,整数幂) 
+
+…… 
+
+4．日期函数 
+
+getdate() 
+
+datepart(日期部分，日期) 
+
+datediff(日期部分，日期1,日期2) 
+
+dateadd(日期部分，数值表达式，日期) 
+
+5．类型转换函数 
+
+convert(数据类型，表达式[，格式]) 
+
+例子：
+select * from tblNewFundInfo where char_length(convert (varchar(10),NAV))=9
+
+6．系统函数 
+
+db_name([数据库ID]) 
+
+host_name() 
+
+isnull(表达式1,表达式2) 
+
+
+
+

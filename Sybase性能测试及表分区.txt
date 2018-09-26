@@ -1,0 +1,423 @@
+
+Union all 
+70并发平均响应时间144ms，TPS略低476.195笔/秒
+30并发平均响应时间60ms，TPS为490.552笔/秒
+40并发平均响应时间80ms，TPS为486.921
+
+
+
+
+分页
+TPS 48.65，响应时间827ms  40
+
+重点：
+
+
+1.bcp导数据（维护数据库表结构和生产导出的表结构一致）
+	》空间不足，给数据库扩容
+	》检查索引
+2.测试数据
+	》多多考虑场景，关联表中是否均有对应数据等
+3.测试结果关注点
+	》后台统计耗时，lr统计耗时（网络耗时+压力机耗时+交易处理耗时=lr统计的耗时），TPS
+	》应用+数据库的服务器CPU资源占用情况（top指令）
+	》
+	
+！注意控制日志输出，性能测试下可以把所有日志关闭，避免影响测试效果
+！sybase会有高速缓存，为了避免这个，尽量提供一定量的测试数据（测试中心一批次70W数据）
+
+(压力机仅用作发压，执行机除压力机外还包括控制机)
+--------------------------------------------------------------------------------------------------------------------------------------------
+
+根据查看交易日志表tblTransJournal(His)获取系统执行情况
+
+
+select TransCode, count(1) from  tblTransJournal 
+where TransDate='20180820' 
+and TransCode ='AT15'
+--and ReturnCode = 'AAAAAAA'
+group by TransCode
+
+--查看系统处理交易耗时
+select TransCode, count(*) cnt ,ceiling(avg(TransDealTimes))  as tdtimes,ceiling(avg(CoreDealTimes)) as cdtimes ,
+ceiling(avg(TransDealTimes-CoreDealTimes))  as atimes
+from tblTransJournal 
+where TransDate='20180820' 
+and TransCode in ('AT15')
+and TransTime >'170000'  --21275  113
+--and ReturnCode = 'AAAAAAA'
+group by TransCode
+order by TransCode
+
+	--查看timewait
+	netstat -an |grep 10.114.29.122:8001|grep TIME_WAIT|wc -l
+
+--------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+----------------------------------------------------sybase数据库基本操作指令记录-------------------------------------------------------------------------------
+
+
+
+10.114.6.20		sa	sa		系统管理员
+sybase/sybase1801pfjj			sa1234xncs
+	5000	openfund	openfund	SPDBJJ	银基通性能数
+			XncsOpenfund21
+
+
+查看数据库服务：
+isql -Usa -Psa1234xncs -SSPDBJJ
+
+启动数据库服务器：
+10.114.6.20sybase/sybase
+vmyjtdb:[/sybase]$isql -Usa -Psa1234 -SSPDBJJ
+CT-LIBRARY error:
+ct_connect(): network packet layer: internal net library error: Net-Lib protocol driver call to connect two endpoints failed
+以上提示说明数据库服务器已关闭
+启动数据库服务器：
+cd /sybase/ASE-15_0/install
+startserver -f RUN_SPDBJJ
+10.114.6.20sybase/sybase1801pfjj
+
+！！！备份有记得开启备份服务器,可以查看master主库的系统表sysservers
+startserver -f RUN_SPDBJJ_BS
+
+sp_addserver SYS_BACKUP,null,SPDBJJ_BS
+sp_dropserver SYS_BACKUP
+
+Exit 推出 isql
+
+
+查看数据库使用性能:
+1.isql -U用户 -P密码 -S数据库服务名(以性能测试库为例： isql -Usa -Psa1234xncs-SSPDBJJ)
+2.sp_sysmon "hh:mm:ss（sp_sysmon "00:00:28"）
+3.go
+
+Session.log
+Lock Manager
+
+
+cd jjdata
+Cat bcpData.sh
+查看操作方式
+一般sh bcpData.sh -tu -ptdic
+sh bcpData.sh -h
+sh bcpData.sh -ta -pdic          //in目录下追加数据到数据库
+
+bcp tblNewFundInfo in tm_tblNewFundInfo.txt -Uopenfund -PXncsOpenfund21 -SSPDBJJ -c -t"!^ " -Jcp936
+
+
+-ta对in目录下
+u对输入的表0结束
+f对list.out文件列表操作
+-pt清空数据表
+d删除主键索引
+i导入数据
+c添加主键索引
+m比对数据量
+a包括12345
+o导出数据
+//file  system  full       (df -k 查看磁盘空间  du -k /home)
+
+
+select * from sysobjectss
+sp_helpdevice openfund_log
+
+sp_helpdb
+sp_helpdevice
+sp_helpsegment
+alter  database openfund log on openfund_log=1024
+
+
+disk init name = 'openfund03', physname = '/spdbpfbdb/dbdata/openfund03',size = '51200M', dsync = false
+disk init name = 'openfund_log02', physname = '/spdbpfbdb/dbdata/openfund_log02',size = '20480M', dsync = false 
+alter  database openfund log on openfund_log02=20480
+sp_helpdb openfund
+sp_sysmon "00:01:28"
+
+sp_helpsegment 'default'
+sp_helpsegment 'logsegment'
+sp_helpsegment 'system'
+sp_version
+sp_helpconfig "number of open partitions"
+sp_countmetadata "open partitions" --得到配置的分区数
+
+
+sp_help tblBonusDetailHis
+sp_helpdevice 
+sp_helpdb 'openfund'                      -----查看数据库分配存放物理磁盘情况
+
+--设置日志截断
+sp_dboption openfund,"trunc log on chkpt",true
+checkpoint
+--清空日志
+dump transaction oprnfund with no_log
+
+sp_addsegment seg4,openfund,openfund05 --sp_addsegment 段名，数据库名，设备名
+sp_extendsegment seg1,openfund,openfund02 --分段增加内存？
+sp_configure "enable semantic partitioning",1 --启用表分区功能参数
+sp_dropsegment seg3,openfund,openfund03         -- 删除segment
+sp_dropsegment seg3,openfund                  ------- 删除segment
+sp_helpdevice
+sp_addsegment    seg3,openfund,openfund03 
+sp_helpartition tblIPOSubsApps
+sp_help
+sp_helpsegment 'seg3'
+sp_
+--先建一个数据库段在
+drop table tblIPOSubsApps
+truncate table tblIPOSubsApps
+drop index tblIPOSubsApps.IDX_IPOSA_TAC
+go
+drop index tblIPOSubsApps.IDX_IPOSA_TD
+go
+alter table tblIPOSubsApps partition by roundrobin 1 
+alter table tblBonusDetailHis partition by roundrobin 32  ---------轮询分区
+alter table tblIPOSubsApps partition by range(TransDate)(TransDate1 values <=('2016-12-31') on seg1,TransDate2 values <=('2017-12-31') on seg2,TransDate3 values <=('2018-12-31') on seg3,TransDate4 values <=('2019-12-31 23:59:59.999') on seg4)---------范围分区
+
+create nonclustered index IDX_IPOSA_TAC on tblIPOSubsApps ( TransAcntCode)
+go
+create nonclustered index IDX_IPOSA_TD on tblIPOSubsApps ( TransDate)
+go
+
+例子：
+create table tblIPOSubsApps (
+	SerialNo                        char(24)                         not null  ,
+	CurrencyType                    varchar(3)                           null  ,
+	FundCode                        char(6)                              null  
+)partition by range(TransDate)(TransDate1 values <=('2016-12-31 23:59:59.999') on seg1,TransDate2 values <=('2017-12-31 23:59:59.999') on seg2,TransDate3 values <=('2018-12-31 23:59:59.999') on seg3,TransDate4 values <=('2019-12-31 23:59:59.999') on seg4)
+
+
+
+sp_configure "number of aux scan descriptors",400
+
+!update table static //执行更新
+
+--生成static文件脚本
+---------------------------------------------------------------------------------------------------------------------------------
+# 获取所有数据库中所有用户表名，并导入到allTables_org.txt文件中
+echo "`isql -Uopenfund -PXncsOpenfund21 -SSPDBJJ << EOF
+select name from sysobjects where type = 'U' and name  in('tblBonusDetailHis','tblSettleDetailHis','tblFundCnvtApps','tblRedeApps','tblCnvtTrusteeApps','tblIPOSubsBookHis','tblIPOSubsBook','tblCnvtSettleDetailHis','tblDvndSetAppsHis','tblCustInfo','tblIPOSubsApp')  order by name asc
+go
+quit
+EOF`" > allTables_org.txt
+
+# 对allTables_org.txt文件操作，包括：删除不需要的信息；删除空白行等
+sed -e '1,2d' -e '$d' -e '$d' -e 's/ //g' -e '/^$/d' allTables_org.txt > Tables.txt
+
+# 删除临时文件
+rm -rf allTables_org.txt
+
+# 循环
+
+for tableName in $(cat Tables.txt)
+do
+
+echo "update statistics $tableName with print_progress=1"   | tee -a statistics
+echo "go" | tee -a statistics 
+echo "update index statistics $tableName with print_progress=1" | tee -a index_statistics 
+echo "go" | tee -a index_statistics
+done
+---------------------------------------------------------------------------------------------------------------------------------
+#执行更新
+isql -S$server -Dopenfund -U$userName -P$userPwd -istatistics 
+isql -S$server -Dopenfund -U$userName -P$userPwd -iindex_statistics
+
+
+
+
+
+--------------------------------------------------
+
+select count(*) cnt ,ceiling(avg(TransDealTimes)) as tdtimes,ceiling(avg(CoreDealTimes)) as cdtimes ,
+ceiling(avg(TransDealTimes)) -ceiling(avg(CoreDealTimes)) as atimes
+from tblTransJournal 
+where TransDate='20130416' 
+and TransCode in ('1902','1906','1913','1912','1928' )
+--and TransCode in ('1902','1906','1913','1912','1914','1928' ) 6113835 47 48208482 125.32
+and ReturnCode = 'AAAAAAA'
+
+select top 500 TransTime, ChannelFlag, count(1) as transNum, ceiling(avg(TransDealTimes)) as transDealTimes from tblTransJournal
+where TransDate = '20130416' and TransCode = '1914' and TransTime between '090815'and '170000' group by TransTime, ChannelFlag order by transDealTimes desc
+
+select top 150 TransTime, ChannelFlag, count(1) as transNum, ceiling(avg(TransDealTimes)) as transDealTimes from tblTransJournal
+where TransDate = '20121025' and TransCode = '1928' group by TransTime, ChannelFlag order by transDealTimes desc
+
+select TransCode, count(1) as transNum --, ceiling(avg(TransDealTimes)) as transDealTimes 42485256 5532840
+from tblTransJournal
+where TransDate = '20121130' and TransTime between '175350'and '175401' group by TransCode order by transNum desc
+
+select top 1 * from tblTransJournal 
+where TransDate='20130416' 
+and TransCode in ('1914','1928' )
+--and ReturnCode = 'AAAAAAA'
+group by TransCode
+order by TransCode
+
+
+--update tblTransJournal set TransTimeOfMin = substring(TransTime,1,4)
+select TransCode, count(1) from tblTransJournal 
+where TransDate='20130416' 
+and TransCode ='1914'
+--and ReturnCode = 'AAAAAAA'
+group by TransCode
+
+select TransCode, count(*) cnt ,ceiling(avg(TransDealTimes)) as tdtimes,ceiling(avg(CoreDealTimes)) as cdtimes ,
+ceiling(avg(TransDealTimes-CoreDealTimes)) as atimes
+from tblTransJournal 
+where TransDate='20130416' 
+and TransCode in ('1902','1906','1913','1912','1914','1928' )
+--and ReturnCode = 'AAAAAAA'
+group by TransCode
+order by TransCode
+
+select TransCode, count(*) cnt ,ceiling(avg(TransDealTimes)) as tdtimes,ceiling(avg(CoreDealTimes)) as cdtimes ,
+ceiling(avg(TransDealTimes-CoreDealTimes)) as atimes
+from tblTransJournal 
+where TransDate='20121030' 
+and TransCode in ('1902','1906','1913','1912','1914','1928' )
+and TransTime < '170000' --21275 113
+and ReturnCode = 'AAAAAAA' 
+group by TransCode
+order by TransCode
+
+
+select TransCode, count(*) cnt ,ceiling(avg(TransDealTimes)) as tdtimes,ceiling(avg(CoreDealTimes)) as cdtimes ,
+ceiling(avg(TransDealTimes)) -ceiling(avg(CoreDealTimes)) as atimes
+from tblTransJournal 
+where TransDate='20130416' 
+and TransCode in ('1902','1906','1913','1912','1914','1928' )
+and TransTime > '170000' --9197 70
+--and ReturnCode = 'AAAAAAA'
+group by TransCode
+order by TransCode
+
+------------------------------------------------------------------------------------------------------------------------------------------------
+定时任务执行sql
+
+!!!切记用oracle用户创建文件 ，这样用户的全局变量才有sqlplus指令
+
+#!/bin/sh
+# 脚本说明:
+#  生成导出数据的控制文件
+userName='spdbjj'
+userPwd='spdbjj'
+serviceName='openfund_s'
+# 全局变量
+
+
+echo "`sqlplus -nologintime $userName/$userPwd@$serviceName << EOF
+PURGE RECYCLEBIN;
+SET PAGESIZE 400;
+SET FEEDBACK OFF;
+SELECT * from tblcustinfo where custno = 'A004320317';
+quit
+EOF`" > updateDatabase.log
+
+
+
+-----------------------------------------------------------------------------
+-- tblTransApplyHis建立roundrobin分区和索引
+-----------------------------------------------------------------------------
+use new_spdbxs
+go
+alter table tblTransApplyHis partition by roundrobin 1
+go
+truncate table tblTransApplyHis
+go
+drop index tblTransApplyHis.IDX_TAH_TT
+go
+drop index tblTransApplyHis.IDX_TRANSHIS_TB
+go
+insert into tblTransApplyHis  select * from   Tmp_tblTransApplyHis            
+go 
+alter table tblTransApplyHis partition by roundrobin 32 
+go
+create nonclustered index IDX_TAH_TT on tblTransApplyHis(TransAcntCode, TransDate) local index
+go
+create nonclustered index IDX_TRANSHIS_TB on tblTransApplyHis(TransDate, BusinessCode) local index
+go
+
+-----------------------------------------------------------------------------
+-- tblBonusDetailHis建立roundrobin分区和索引
+-----------------------------------------------------------------------------
+use new_spdbxs
+go
+alter table tblBonusDetailHis partition by roundrobin 1
+go
+truncate table tblBonusDetailHis
+go
+drop index tblBonusDetailHis.IDX_BD_TPTC
+go
+drop index tblBonusDetailHis.IDX_BD_TPC
+go
+insert into tblBonusDetailHis  select * from   Tmp_tblBonusDetailHis            
+go 
+alter table tblBonusDetailHis partition by roundrobin 32 
+go
+create nonclustered index IDX_BD_TPTC on tblBonusDetailHis(TaSerialNo, ProductCode, TransAcntCode, CfmDate) local index
+go
+create nonclustered index IDX_BD_TPC on tblBonusDetailHis(TransAcntCode, ProductCode, CfmDate) local index
+go
+
+-----------------------------------------------------------------------------
+-- tblRepeatPrintDataHis建立roundrobin分区和索引
+-----------------------------------------------------------------------------
+use new_spdbxs
+go
+alter table tblRepeatPrintDataHis partition by roundrobin 1
+go
+truncate table tblRepeatPrintDataHis
+go
+drop index tblRepeatPrintDataHis.IDX_RPDH_OT
+go
+drop index tblRepeatPrintDataHis.IDX_TRPDHIS_ACNTDT
+go
+drop index tblRepeatPrintDataHis.IDX_TRPDHIS_SNO
+go
+drop index tblRepeatPrintDataHis.IDX_RPDH_DATEBANK
+go
+insert into tblRepeatPrintDataHis  select * from  Tmp_tblRepeatPrintDataHis            
+go 
+alter table tblRepeatPrintDataHis partition by roundrobin 32 
+go
+create nonclustered index IDX_RPDH_OT on tblRepeatPrintDataHis(OperatorCode, TransDate) local index
+go
+create nonclustered index IDX_TRPDHIS_ACNTDT on tblRepeatPrintDataHis(TransAcntCode, TransDate) local index
+go
+create nonclustered index IDX_TRPDHIS_SNO on tblRepeatPrintDataHis(SerialNo) local index
+go
+create nonclustered index IDX_RPDH_DATEBANK on tblRepeatPrintDataHis(TransDate, TransApplBankCode) local index
+go
+
+
+-----------------------------------------------------------------------------
+-- tblRepeatPrintDataHis建立roundrobin分区和索引
+-----------------------------------------------------------------------------
+use new_spdbxs
+go
+alter table tblSettleDetailHis partition by roundrobin 1
+go
+truncate table tblSettleDetailHis
+go
+drop index tblSettleDetailHis.IDX_SDH_PTB
+go
+drop index tblSettleDetailHis.IDX_SDH_SBC
+go
+drop index tblSettleDetailHis.IDX_SDH_TD
+go
+drop index tblSettleDetailHis.IDX_CFMHIS_CB
+go
+insert into tblSettleDetailHis  select * from  Tmp_tblSettleDetailHis            
+go 
+alter table tblSettleDetailHis partition by roundrobin 32 
+go
+create nonclustered index IDX_SDH_PTB on tblSettleDetailHis(TransAcntCode, ProductCode) local index
+go
+create nonclustered index IDX_SDH_SBC on tblSettleDetailHis(SerialNo, BusinessCode, CfmDate) local index
+go
+create nonclustered index IDX_SDH_TD on tblSettleDetailHis(TransDate) local index
+go
+create nonclustered index IDX_CFMHIS_CB on tblSettleDetailHis(CfmDate, BusinessCode) local index
+go
